@@ -65,7 +65,8 @@ my $fhc;
 foreach my $file (@ARGV) {
     my $lines = get_content($file);
     my $struct = {'filename' => $file};
-    
+
+    # parse sql file
     foreach my $line (@$lines) {
         if ($line =~ /$table_def/) {
             my $name = $1;
@@ -103,7 +104,6 @@ foreach my $struct (@structs) {
     my $guard;
 
     $filename =~ s/\.sql$//;
-
     $h_filename = "$filename.h";
     $c_filename = "$filename.c";
     $guard = uc "__" . $filename . "_h__";
@@ -123,7 +123,6 @@ foreach my $struct (@structs) {
     }
     print $fhh "};\n";
 
-
     # .c file
     print $fhc "/* Automatically generated at $now */\n";    
     print $fhc "#include <stdlib.h>\n";
@@ -133,8 +132,8 @@ foreach my $struct (@structs) {
     generate_free($struct); 
     generate_release($struct);
     generate_read($struct);
+    generate_update($struct);
     generate_delete($struct);
-
     print $fhh "#endif /* $guard */\n";
     
     close $fhh;
@@ -194,14 +193,13 @@ sub generate_read {
             next;
         }
 
-        $q = $q . $$var{'name'} . ",";
+        $q = $q . "$$var{'name'},";
         push @vars, $$var{'name'};
     }
     chop $q;
 
     # Add primary key(s)
     $q = $q . ") FROM $$struct{'name'} WHERE $$pk[0] = ?";
-
     for (my $i = 1; $i < $num_pk; $i++) {
         $q = $q . " AND $$pk[$i] = ?";
     }
@@ -235,11 +233,68 @@ sub generate_read {
     print $fhc "cleanup:\n";
     sqlite_call_last("sqlite3_finalize", "pstmt");
     print $fhc "return ret;\n";
-    print $fhc "}\n";    
+    print $fhc "}\n";
 }
 
 sub generate_update {
-    my ($struct) = @_;    
+    my ($struct) = @_;
+    my $q = "UPDATE $$struct{'name'} SET ";
+    my $pk = $$struct{'primary_key'};
+    my $num_pk = scalar @$pk;
+    my @vars;
+    my $num_vars;
+    my $pos = 1;
+
+    foreach my $var (@{$$struct{"variables"}}) {
+        my $is_pk = 0;
+        foreach my $curr_pk (@$pk) {
+            if ($$var{'name'} eq $curr_pk) {
+                $is_pk = 1;
+                last;
+            }
+        }
+
+        if ($is_pk) {
+            next;
+        }
+
+        $q = $q . "$$var{'name'} = ?,";
+        push @vars, $$var{'name'};        
+    }
+    chop $q;
+    $num_vars = scalar @vars;
+
+    # Add primary key(s)
+    $q = $q . " WHERE $$pk[0] = ?";
+    for (my $i = 1; $i < $num_pk; $i++) {
+        $q = $q . " AND $$pk[$i] = ?";
+    }
+
+    # Prologue
+    print $fhh "extern int $$struct{'name'}_update($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhc "int $$struct{'name'}_update($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
+    print $fhc "char* q = \"$q\";\n";
+    print $fhc "sqlite3_stmt* pstmt;\n";
+    print $fhc "int ret;\n";
+
+    # Body
+    sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
+    for (my $i = 0; $i < $num_vars; $i++) {
+        sqlite_bind($struct, $pos, $vars[$i]);
+        $pos++;
+    }
+    for (my $i = 0; $i < $num_pk; $i++) {
+        sqlite_bind($struct, $pos, $$pk[$i]);
+        $pos++;        
+    }
+    sqlite_call_ex("sqlite3_step", "SQLITE_DONE", "pstmt");    
+    
+    # Epilogue
+    print $fhc "ret = 0;\n";
+    print $fhc "cleanup:\n";
+    sqlite_call_last("sqlite3_finalize", "pstmt");
+    print $fhc "return ret;\n";
+    print $fhc "}\n";
 }
 
 sub generate_delete {
@@ -249,7 +304,6 @@ sub generate_delete {
     my $num_pk = scalar @$pk;
 
     $q = $q . "$$pk[0] = ?";
-
     for (my $i = 1; $i < $num_pk; $i++) {
         $q = $q . " AND $$pk[$i] = ?";
     }
@@ -366,15 +420,15 @@ sub sqlite_bind {
     if (($ctype eq "char") ||
         ($ctype eq "short") ||
         ($ctype eq "int")) {
-        sqlite_call("sqlite3_bind_int", "pstmt", $index, "(int)$this" . "->$var");
+        sqlite_call("sqlite3_bind_int", "pstmt", $index, "(int)$this->$var");
     } elsif ($ctype eq "long") {
-        sqlite_call("sqlite3_bind_int64", "pstmt", $index, "$this" . "->$var");
+        sqlite_call("sqlite3_bind_int64", "pstmt", $index, "$this->$var");
     } elsif ($ctype eq "float") {
-        sqlite_call("sqlite3_bind_double", "pstmt", $index, "(double)$this" . "->$var");
+        sqlite_call("sqlite3_bind_double", "pstmt", $index, "(double)$this->$var");
     } elsif ($ctype eq "double") {
-        sqlite_call("sqlite3_bind_double", "pstmt", $index, "$this" . "->$var");
+        sqlite_call("sqlite3_bind_double", "pstmt", $index, "$this->$var");
     } elsif ($ctype eq "char*"){
-        sqlite_call("sqlite3_bind_text", "pstmt", $index, "$this" . "->$var", -1, "SQLITE_STATIC");
+        sqlite_call("sqlite3_bind_text", "pstmt", $index, "$this->$var", -1, "SQLITE_STATIC");
     } else {
         print "Unknown type '$ctype'\n";
         exit(1);
