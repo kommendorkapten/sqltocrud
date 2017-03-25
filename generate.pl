@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 ##
-# Copyright (C) 2016 Fredrik Skogman, skogman - at - gmail.com.
+# Copyright (C) 2017 Fredrik Skogman, skogman - at - gmail.com.
 #
 # The contents of this file are subject to the terms of the Common
 # Development and Distribution License (the "License"). You may not use this
@@ -22,6 +22,9 @@
 # operates solely on the primary key(s).
 # Possible extensions in the future is to add multiple database engines,
 # such as MySQl and support to generate for more languages.
+#
+# All CRUD methods returns 0 on sucess, negative on error and positive if
+# no matching rows could be find.
 #
 
 use warnings;
@@ -123,8 +126,13 @@ foreach my $struct (@structs) {
 
     # .c file
     print $fhc "/* Automatically generated at $now */\n";    
-    print $fhc "#include <stddef.h>\n";
+    print $fhc "#include <stdlib.h>\n";
+    print $fhc "#include <string.h>\n";    
     print $fhc "#include \"$h_filename\"\n";    
+    generate_alloc($struct);
+    generate_free($struct); 
+    generate_release($struct);
+    generate_read($struct);
     generate_delete($struct);
 
     print $fhh "#endif /* $guard */\n";
@@ -132,8 +140,10 @@ foreach my $struct (@structs) {
     close $fhh;
     close $fhc;
 
-    `indent -bl -bap -bad $h_filename`;
-    `indent -bl -bap -bad $c_filename`;    
+    `indent -i8 -nce -bc -bl -bap -bad $h_filename`;
+    `indent -i8 -nce -bc -bl -bap -bad $c_filename`;
+
+    # Verify code: gcc -std=c99 -Wconversion -Wno-sign-conversion -Wextra -Wall -pedantic -c $c_filename
 }
 
 sub get_content {
@@ -163,6 +173,75 @@ sub generate_create {
     my ($struct) = @_;    
 }
 
+sub generate_read {
+    my ($struct) = @_;
+    my $q = "SELECT (";
+    my $pk = $$struct{'primary_key'};
+    my $num_pk = scalar @$pk;
+    my @vars;
+
+    # Create query
+    foreach my $var (@{$$struct{"variables"}}) {
+        my $is_pk = 0;
+        foreach my $curr_pk (@$pk) {
+            if ($$var{'name'} eq $curr_pk) {
+                $is_pk = 1;
+                last;
+            }
+        }
+
+        if ($is_pk) {
+            next;
+        }
+
+        $q = $q . $$var{'name'} . ",";
+        push @vars, $$var{'name'};
+    }
+    chop $q;
+
+    # Add primary key(s)
+    $q = $q . ") FROM $$struct{'name'} WHERE $$pk[0] = ?";
+
+    for (my $i = 1; $i < $num_pk; $i++) {
+        $q = $q . " AND $$pk[$i] = ?";
+    }
+
+    # Prologue
+    print $fhh "extern int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhc "int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
+    print $fhc "char* q = \"$q\";\n";
+    print $fhc "const unsigned char* c;\n";
+    print $fhc "int br;\n";
+    print $fhc "sqlite3_stmt* pstmt;\n";
+    print $fhc "int ret;\n";
+
+    # Body
+    sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
+    for (my $i = 0; $i < $num_pk; $i++) {
+        # all binds occur at index 1+
+        sqlite_bind($struct, $i + 1, $$pk[$i]);
+    }
+    print $fhc "ret = sqlite3_step(pstmt);\n";
+    print $fhc "if (ret == SQLITE_DONE) {ret = 1; goto cleanup;}\n";
+    print $fhc "if (ret != SQLITE_ROW) {ret = -1; goto cleanup;}\n";
+    # Extract columns
+    my $num_vars = scalar @vars;
+    for (my $i = 0; $i < $num_vars; $i++) {
+        sqlite_assign_variable($struct, $i, $vars[$i]);
+    }
+    
+    # Epilogue
+    print $fhc "ret = 0;\n";
+    print $fhc "cleanup:\n";
+    sqlite_call_last("sqlite3_finalize", "pstmt");
+    print $fhc "return ret;\n";
+    print $fhc "}\n";    
+}
+
+sub generate_update {
+    my ($struct) = @_;    
+}
+
 sub generate_delete {
     my ($struct) = @_;
     my $q = "DELETE FROM $$struct{'name'} WHERE ";
@@ -185,7 +264,7 @@ sub generate_delete {
     # Body
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
     for (my $i = 0; $i < $num_pk; $i++) {
-        # all binds occur at index 1
+        # all binds occur at index 1+
         sqlite_bind($struct, $i + 1, $$pk[$i]);
     }
 
@@ -197,6 +276,47 @@ sub generate_delete {
     sqlite_call_last("sqlite3_finalize", "pstmt");
     print $fhc "return ret;\n";
     print $fhc "}\n";
+}
+
+sub generate_alloc {
+    my ($struct) = @_;
+
+    print $fhh "extern struct $$struct{'name'}* $$struct{'name'}_alloc(struct $$struct{'name'}* $this);";
+    print $fhc "struct $$struct{'name'}* $$struct{'name'}_alloc(struct $$struct{'name'}* $this) {\n";
+    print $fhc "struct $$struct{'name'}* this = malloc(sizeof(struct $$struct{'name'}));\n";
+
+    foreach my $var (@{$$struct{"variables"}}) {
+        if ($$var{"ctype"} eq "char*") {
+            print $fhc "this->$$var{'name'} = NULL;\n";
+        }
+    }
+
+    print $fhc "return this;\n";
+    print $fhc "}\n";
+}
+
+sub generate_free {
+    my ($struct) = @_;
+
+    print $fhh "extern void $$struct{'name'}_free(struct $$struct{'name'}* $this);";
+    print $fhc "void $$struct{'name'}_free(struct $$struct{'name'}* $this) {\n";
+    print $fhc "$$struct{'name'}_release(this);\n";
+    print $fhc "free(this);\n";
+    print $fhc "}\n";
+}
+    
+sub generate_release {
+    my ($struct) = @_;
+
+    print $fhh "extern void $$struct{'name'}_release(struct $$struct{'name'}* $this);";
+    print $fhc "void $$struct{'name'}_release(struct $$struct{'name'}* $this) {\n";
+    foreach my $var (@{$$struct{"variables"}}) {
+        if ($$var{"ctype"} eq "char*") {
+            print $fhc "free(this->$$var{'name'});\n";
+            print $fhc "this->$$var{'name'} = NULL;\n";
+        }
+    }
+    print $fhc "}\n";    
 }
 
 sub sqlite_call {
@@ -261,6 +381,32 @@ sub sqlite_bind {
     }
 }
 
+sub sqlite_assign_variable {
+    my ($struct, $index, $var) = @_;
+    my $ctype = get_ctype($struct, $var);
+
+    if (($ctype eq "char") ||
+        ($ctype eq "short") ||
+        ($ctype eq "int")) {
+        print $fhc "$this->$var = ($ctype)sqlite3_column_int(pstmt, $index);\n";
+    } elsif ($ctype eq "long") {
+        print $fhc "$this->$var = sqlite3_column_int64(pstmt, $index);\n";
+    } elsif ($ctype eq "float") {
+        print $fhc "$this->$var = (float)sqlite3_column_double(pstmt, $index);\n";
+    } elsif ($ctype eq "double") {
+        print $fhc "$this->$var = sqlite3_column_double(pstmt, $index);\n";
+    } elsif ($ctype eq "char*"){
+        print $fhc "c = sqlite3_column_text(pstmt, $index);\n";
+        print $fhc "br = sqlite3_column_bytes(pstmt, $index);\n";
+        print $fhc "$this->$var = malloc(br + 1);\n";
+        print $fhc "memcpy($this->$var, c, br);\n";
+        print $fhc "$this->$var" . "[br] = '\\0';\n";
+    } else {
+        print "Unknown type '$ctype'\n";
+        exit(1);
+    }    
+}
+
 sub get_ctype {
     my ($struct, $cvar) = @_;
     my $ctype;
@@ -272,5 +418,10 @@ sub get_ctype {
         }
     }
 
+    if (!defined $ctype) {
+        print "Unknown variable: $cvar\n";
+        exit(1);
+    }
+    
     return $ctype;
 }
