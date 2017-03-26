@@ -269,6 +269,7 @@ sub generate_create {
     print $fhc "char* q = \"$q_exp\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
     print $fhc "int ret;\n";
+    print $fhc "int retf;\n";
 
     # Body
     if (!$explicit_key) {
@@ -319,14 +320,20 @@ sub generate_create {
 
 sub generate_read {
     my ($struct) = @_;
-    my $q = "SELECT (";
+    my $q = "SELECT ";
     my $pk = $$struct{'primary_key'};
     my $num_pk = scalar @$pk;
     my @vars;
-
+    my $got_pointer = 0;
+    
     # Create query
     foreach my $var (@{$$struct{"variables"}}) {
         my $is_pk = 0;
+
+        if ($$var{'ctype'} eq "char*" ){
+            $got_pointer = 1;
+        }
+        
         foreach my $curr_pk (@$pk) {
             if ($$var{'name'} eq $curr_pk) {
                 $is_pk = 1;
@@ -344,7 +351,7 @@ sub generate_read {
     chop $q;
 
     # Add primary key(s)
-    $q = $q . ") FROM $$struct{'name'} WHERE $$pk[0] = ?";
+    $q = $q . " FROM $$struct{'name'} WHERE $$pk[0] = ?";
     for (my $i = 1; $i < $num_pk; $i++) {
         $q = $q . " AND $$pk[$i] = ?";
     }
@@ -353,10 +360,15 @@ sub generate_read {
     print $fhh "extern int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);\n";
     print $fhc "int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q\";\n";
-    print $fhc "const unsigned char* c;\n";
-    print $fhc "int br;\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
     print $fhc "int ret;\n";
+    print $fhc "int retf;\n";
+
+    # Only generate if struct contains at least one pointer
+    if ($got_pointer) {
+        print $fhc "const unsigned char* c;\n";
+        print $fhc "int br;\n";        
+    }
 
     # Body
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
@@ -421,6 +433,7 @@ sub generate_update {
     print $fhc "char* q = \"$q\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
     print $fhc "int ret;\n";
+    print $fhc "int retf;\n";
 
     # Body
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
@@ -459,6 +472,7 @@ sub generate_delete {
     print $fhc "char* q = \"$q\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
     print $fhc "int ret;\n";
+    print $fhc "int retf;\n";
 
     # Body
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
@@ -509,6 +523,7 @@ sub generate_release {
 
     print $fhh "extern void $$struct{'name'}_release(struct $$struct{'name'}* $this);\n";
     print $fhc "void $$struct{'name'}_release(struct $$struct{'name'}* $this) {\n";
+    print $fhc "(void)this;\n";
     foreach my $var (@{$$struct{"variables"}}) {
         if ($$var{"ctype"} eq "char*") {
             print $fhc "if (this->$$var{'name'}) {\n";
@@ -538,12 +553,12 @@ sub sqlite_call_last {
     my @args = @_;
     my $num_args = scalar @args;
 
-    print $fhc "ret = $fun($args[0]";
+    print $fhc "retf = $fun($args[0]";
     for (my $i = 1; $i < $num_args; $i++) {
         print $fhc ",$args[$i]";
     }
     print $fhc ");\n";
-    print $fhc "if (ret != SQLITE_OK) {ret = -1;}\n";
+    print $fhc "if (retf != SQLITE_OK) {ret = -1;}\n";
 }
 
 sub sqlite_call_ex {
