@@ -72,8 +72,18 @@ my $db_ref_type = "sqlite3*";
 my @structs;
 my $fhh;
 my $fhc;
+my $verbose = 0;
+my $indent = 0;
 
 foreach my $file (@ARGV) {
+    if ($file eq "-v") {
+        $verbose = 1;
+        next;
+    }
+    if ($file eq "-i") {
+        $indent = 1;
+        next;
+    }
     my $lines = get_content($file);
     my $struct = {'filename' => $file};
 
@@ -114,11 +124,16 @@ foreach my $struct (@structs) {
     my $now = localtime();
     my $guard;
 
+    log1("Scanning $filename");
     $filename =~ s/\.sql$//;
     $h_filename = "$filename.h";
     $c_filename = "$filename.c";
-    $guard = uc "__" . $filename . "_h__";
-    
+    $guard = `basename $filename`;
+    chomp $guard;
+    $guard = uc "__" . $$ ."_" . $guard . "_h__";
+
+    log1("Creating $h_filename");
+    log1("Creating $c_filename");
     open($fhh, ">", $h_filename) or die "Could not create $h_filename";
     open($fhc, ">", $c_filename) or die "Could not create $c_filename";
 
@@ -153,8 +168,20 @@ foreach my $struct (@structs) {
     close $fhh;
     close $fhc;
 
-    `indent -i8 -nce -bc -bl -bap -bad $h_filename`;
-    `indent -i8 -nce -bc -bl -bap -bad $c_filename`;
+    if ($indent) {
+        log1("Running indent");
+        `indent -i8 -nce -bc -bl -bap -bad $h_filename`;
+        `indent -i8 -nce -bc -bl -bap -bad $c_filename`;
+
+        # Remove .BAK files
+        my $basename;
+        $basename = `basename $h_filename`;
+        chomp $basename;
+        `rm $basename.BAK`;
+        $basename = `basename $c_filename`;
+        chomp $basename;
+        `rm $basename.BAK`;
+    }
 
     # Verify code: gcc -std=c99 -Wconversion -Wno-sign-conversion -Wextra -Wall -pedantic -c $c_filename
 }
@@ -237,7 +264,7 @@ sub generate_create {
     $q_imp = $q_imp . ") VALUES ($params)";
 
     # Prologue
-    print $fhh "extern int $$struct{'name'}_create($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhh "extern int $$struct{'name'}_create($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);\n";
     print $fhc "int $$struct{'name'}_create($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q_exp\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
@@ -323,7 +350,7 @@ sub generate_read {
     }
 
     # Prologue
-    print $fhh "extern int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhh "extern int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);\n";
     print $fhc "int $$struct{'name'}_read($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q\";\n";
     print $fhc "const unsigned char* c;\n";
@@ -389,7 +416,7 @@ sub generate_update {
     }
 
     # Prologue
-    print $fhh "extern int $$struct{'name'}_update($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhh "extern int $$struct{'name'}_update($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);\n";
     print $fhc "int $$struct{'name'}_update($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
@@ -427,7 +454,7 @@ sub generate_delete {
     }
 
     # Prologue
-    print $fhh "extern int $$struct{'name'}_delete($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
+    print $fhh "extern int $$struct{'name'}_delete($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);\n";
     print $fhc "int $$struct{'name'}_delete($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q\";\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
@@ -453,7 +480,7 @@ sub generate_delete {
 sub generate_alloc {
     my ($struct) = @_;
 
-    print $fhh "extern struct $$struct{'name'}* $$struct{'name'}_alloc(void);";
+    print $fhh "extern struct $$struct{'name'}* $$struct{'name'}_alloc(void);\n";
     print $fhc "struct $$struct{'name'}* $$struct{'name'}_alloc(void) {\n";
     print $fhc "struct $$struct{'name'}* this = malloc(sizeof(struct $$struct{'name'}));\n";
 
@@ -470,7 +497,7 @@ sub generate_alloc {
 sub generate_free {
     my ($struct) = @_;
 
-    print $fhh "extern void $$struct{'name'}_free(struct $$struct{'name'}* $this);";
+    print $fhh "extern void $$struct{'name'}_free(struct $$struct{'name'}* $this);\n";
     print $fhc "void $$struct{'name'}_free(struct $$struct{'name'}* $this) {\n";
     print $fhc "$$struct{'name'}_release(this);\n";
     print $fhc "free(this);\n";
@@ -480,12 +507,14 @@ sub generate_free {
 sub generate_release {
     my ($struct) = @_;
 
-    print $fhh "extern void $$struct{'name'}_release(struct $$struct{'name'}* $this);";
+    print $fhh "extern void $$struct{'name'}_release(struct $$struct{'name'}* $this);\n";
     print $fhc "void $$struct{'name'}_release(struct $$struct{'name'}* $this) {\n";
     foreach my $var (@{$$struct{"variables"}}) {
         if ($$var{"ctype"} eq "char*") {
+            print $fhc "if (this->$$var{'name'}) {\n";
             print $fhc "free(this->$$var{'name'});\n";
             print $fhc "this->$$var{'name'} = NULL;\n";
+            print $fhc "}\n";            
         }
     }
     print $fhc "}\n";    
@@ -600,4 +629,12 @@ sub get_ctype {
     }
     
     return $ctype;
+}
+
+sub log1 {
+    my ($msg) = @_;
+
+    if ($verbose) {
+        print "$msg\n";
+    }
 }
