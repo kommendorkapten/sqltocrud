@@ -240,8 +240,6 @@ sub generate_create {
     print $fhh "extern int $$struct{'name'}_create($db_ref_type $db_ref_name, struct $$struct{'name'}* $this);";
     print $fhc "int $$struct{'name'}_create($db_ref_type $db_ref_name, struct $$struct{'name'}* $this) {\n";
     print $fhc "char* q = \"$q_exp\";\n";
-    print $fhc "const unsigned char* c;\n";
-    print $fhc "int br;\n";
     print $fhc "sqlite3_stmt* pstmt;\n";
     print $fhc "int ret;\n";
 
@@ -455,8 +453,8 @@ sub generate_delete {
 sub generate_alloc {
     my ($struct) = @_;
 
-    print $fhh "extern struct $$struct{'name'}* $$struct{'name'}_alloc(struct $$struct{'name'}* $this);";
-    print $fhc "struct $$struct{'name'}* $$struct{'name'}_alloc(struct $$struct{'name'}* $this) {\n";
+    print $fhh "extern struct $$struct{'name'}* $$struct{'name'}_alloc(void);";
+    print $fhc "struct $$struct{'name'}* $$struct{'name'}_alloc(void) {\n";
     print $fhc "struct $$struct{'name'}* this = malloc(sizeof(struct $$struct{'name'}));\n";
 
     foreach my $var (@{$$struct{"variables"}}) {
