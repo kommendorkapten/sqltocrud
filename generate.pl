@@ -7,7 +7,7 @@
 # Development and Distribution License (the "License"). You may not use this
 # file except in compliance with the License. You can obtain a copy of the
 # License at http://opensource.org/licenses/CDDL-1.0. See the License for the
-# specific language governing permissions and limitations under the License. 
+# specific language governing permissions and limitations under the License.
 # When distributing the software, include this License Header Notice in each
 # file and include the License file at http://opensource.org/licenses/CDDL-1.0.
 ##
@@ -33,13 +33,13 @@
 # autogenerating of keys, as such calls to inserts may require external
 # synchronization by the client. This limitation is just not for a single
 # table, but for the complete session against the DBMS.
-# 
+#
 # All CRUD methods returns 0 on sucess, negative on error and positive if
 # no matching rows could be find.
 #
 
 use warnings;
-use strict;    
+use strict;
 
 my %data_types = (
     "CHARACTER"         => "char*",
@@ -48,9 +48,9 @@ my %data_types = (
     "BOOLEAN"           => "char",
     "SMALLINT"          => "short",
     "INTEGER"           => "int",
-    "INT"               => "int",    
+    "INT"               => "int",
     "BIGINT"            => "long",
-    "REAL"              => "float", 
+    "REAL"              => "float",
     "FLOAT"             => "float",
     "DOUBLE PRECISION"  => "double",
     "DATE"              => "long",
@@ -100,7 +100,7 @@ foreach my $file (@ARGV) {
             my $ctype = $data_types{$type};
 
             if (defined $ctype) {
-                push @{$$struct{'variables'}}, {'name' => $name, 
+                push @{$$struct{'variables'}}, {'name' => $name,
                                                 'sqltype' => $type,
                                                 'ctype' => $ctype,};
                 next;
@@ -139,10 +139,10 @@ foreach my $struct (@structs) {
 
     # .h file
     print $fhh "/* Automatically generated at $now */\n";
-    print $fhh "/* Do not edit - things may break. */\n";    
+    print $fhh "/* Do not edit - things may break. */\n";
     print $fhh "#ifndef $guard\n";
-    print $fhh "#define $guard\n";    
-    print $fhh "#include <sqlite3.h>\n";        
+    print $fhh "#define $guard\n";
+    print $fhh "#include <sqlite3.h>\n";
     print $fhh "struct $$struct{'name'}\n";
     print $fhh "{\n";
     foreach my $var (@{$$struct{'variables'}}) {
@@ -154,17 +154,17 @@ foreach my $struct (@structs) {
     print $fhc "/* Automatically generated at $now */\n";
     print $fhc "/* Do not edit - things may break. */\n";
     print $fhc "#include <stdlib.h>\n";
-    print $fhc "#include <string.h>\n";    
-    print $fhc "#include \"$h_filename\"\n";    
+    print $fhc "#include <string.h>\n";
+    print $fhc "#include \"$h_filename\"\n";
     generate_alloc($struct);
-    generate_free($struct); 
+    generate_free($struct);
     generate_release($struct);
     generate_create($struct);
     generate_read($struct);
     generate_update($struct);
     generate_delete($struct);
     print $fhh "#endif /* $guard */\n";
-    
+
     close $fhh;
     close $fhc;
 
@@ -189,7 +189,7 @@ foreach my $struct (@structs) {
 sub get_content {
     my ($file) = @_;
     my @content;
-    
+
     open(my $fh, $file) or die "Could not open '$file'";
 
     while(my $line = <$fh>) {
@@ -199,11 +199,11 @@ sub get_content {
         if ($line =~ /PRIMARY\s+KEY/) {
             push @comp, $line;
         } else {
-            @comp = split /,/, $line;   
+            @comp = split /,/, $line;
         }
         push @content, @comp;
     }
-    
+
     close $fh;
 
     return \@content
@@ -211,7 +211,7 @@ sub get_content {
 
 # this is not thread safe!
 sub generate_create {
-    my ($struct) = @_;    
+    my ($struct) = @_;
     my $pk = $$struct{'primary_key'};
     my $num_pk = scalar @$pk;
     my $q_exp = "INSERT INTO $$struct{'name'} (";
@@ -222,13 +222,13 @@ sub generate_create {
     my $params;
     my $ctype;
     my $pos = 1;
-    
+
     if ($num_pk > 1) {
         # Composite key
         $explicit_key = 1;
     } else {
         $ctype = get_ctype($struct, $$pk[0]);
-        
+
         if ($ctype eq "char" ||
             $ctype eq "short" ||
             $ctype eq "int" ||
@@ -255,7 +255,7 @@ sub generate_create {
         if ($$var{'name'} eq $$pk[0]) {
             next;
         }
-        
+
         $q_imp = $q_imp . "$$var{'name'},";
         $params = $params . "?,";
     }
@@ -290,13 +290,13 @@ sub generate_create {
             }
             sqlite_bind($struct, $pos++, $$vars[$i]{'name'});
         }
-        
+
         print $fhc "} else {\n";
         $pos = 1;
         for (my $i = 0; $i < $num_vars; $i++) {
             sqlite_bind($struct, $pos++, $$vars[$i]{'name'});
         }
-        print $fhc "}\n";        
+        print $fhc "}\n";
     }
     # All variables are bind, perform step!
     sqlite_call_ex("sqlite3_step", "SQLITE_DONE", "pstmt");
@@ -309,7 +309,7 @@ sub generate_create {
         print $fhc "this->$$pk[0] = ($ctype)sqlite3_last_insert_rowid($db_ref_name);\n";
         print $fhc "}\n";
     }
-    
+
     # Epilogue
     print $fhc "ret = 0;\n";
     print $fhc "cleanup:\n";
@@ -325,7 +325,7 @@ sub generate_read {
     my $num_pk = scalar @$pk;
     my @vars;
     my $got_pointer = 0;
-    
+
     # Create query
     foreach my $var (@{$$struct{"variables"}}) {
         my $is_pk = 0;
@@ -333,7 +333,7 @@ sub generate_read {
         if ($$var{'ctype'} eq "char*" ){
             $got_pointer = 1;
         }
-        
+
         foreach my $curr_pk (@$pk) {
             if ($$var{'name'} eq $curr_pk) {
                 $is_pk = 1;
@@ -367,7 +367,7 @@ sub generate_read {
     # Only generate if struct contains at least one pointer
     if ($got_pointer) {
         print $fhc "const unsigned char* c;\n";
-        print $fhc "int br;\n";        
+        print $fhc "int br;\n";
     }
 
     # Body
@@ -384,7 +384,7 @@ sub generate_read {
     for (my $i = 0; $i < $num_vars; $i++) {
         sqlite_assign_variable($struct, $i, $vars[$i]);
     }
-    
+
     # Epilogue
     print $fhc "ret = 0;\n";
     print $fhc "cleanup:\n";
@@ -416,7 +416,7 @@ sub generate_update {
         }
 
         $q = $q . "$$var{'name'} = ?,";
-        push @vars, $$var{'name'};        
+        push @vars, $$var{'name'};
     }
     chop $q;
     $num_vars = scalar @vars;
@@ -443,10 +443,10 @@ sub generate_update {
     }
     for (my $i = 0; $i < $num_pk; $i++) {
         sqlite_bind($struct, $pos, $$pk[$i]);
-        $pos++;        
+        $pos++;
     }
     sqlite_call_ex("sqlite3_step", "SQLITE_DONE", "pstmt");
-    
+
     # Epilogue
     print $fhc "ret = 0;\n";
     print $fhc "cleanup:\n";
@@ -482,7 +482,7 @@ sub generate_delete {
     }
 
     sqlite_call_ex("sqlite3_step", "SQLITE_DONE", "pstmt");
-    
+
     # Epiloguqe
     print $fhc "ret = 0;\n";
     print $fhc "cleanup:\n";
@@ -517,7 +517,7 @@ sub generate_free {
     print $fhc "free(this);\n";
     print $fhc "}\n";
 }
-    
+
 sub generate_release {
     my ($struct) = @_;
 
@@ -529,10 +529,10 @@ sub generate_release {
             print $fhc "if (this->$$var{'name'}) {\n";
             print $fhc "free(this->$$var{'name'});\n";
             print $fhc "this->$$var{'name'} = NULL;\n";
-            print $fhc "}\n";            
+            print $fhc "}\n";
         }
     }
-    print $fhc "}\n";    
+    print $fhc "}\n";
 }
 
 sub sqlite_call {
@@ -624,7 +624,7 @@ sub sqlite_assign_variable {
     } else {
         print "Unknown type '$ctype'\n";
         exit(1);
-    }    
+    }
 }
 
 sub get_ctype {
@@ -642,7 +642,7 @@ sub get_ctype {
         print "Unknown variable: $cvar\n";
         exit(1);
     }
-    
+
     return $ctype;
 }
 
