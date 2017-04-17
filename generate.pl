@@ -155,6 +155,7 @@ foreach my $struct (@structs) {
     print $fhc "/* Do not edit - things may break. */\n";
     print $fhc "#include <stdlib.h>\n";
     print $fhc "#include <string.h>\n";
+    print $fhc "#include <assert.h>\n";
     print $fhc "#include \"$h_filename\"\n";
     generate_alloc($struct);
     generate_free($struct);
@@ -272,6 +273,7 @@ sub generate_create {
     print $fhc "int retf;\n";
 
     # Body
+    print $fhc "assert(this);\n";
     if (!$explicit_key) {
         print $fhc "/* Check if a key is expected to be generated or not */\n";
         print $fhc "if (this->$$pk[0] == 0) {q = \"$q_imp\";}\n";
@@ -371,6 +373,7 @@ sub generate_read {
     }
 
     # Body
+    print $fhc "assert(this);\n";
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
     for (my $i = 0; $i < $num_pk; $i++) {
         # all binds occur at index 1+
@@ -436,6 +439,7 @@ sub generate_update {
     print $fhc "int retf;\n";
 
     # Body
+    print $fhc "assert(this);\n";
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
     for (my $i = 0; $i < $num_vars; $i++) {
         sqlite_bind($struct, $pos, $vars[$i]);
@@ -475,6 +479,7 @@ sub generate_delete {
     print $fhc "int retf;\n";
 
     # Body
+    print $fhc "assert(this);\n";
     sqlite_call("sqlite3_prepare_v2", $db_ref_name, , "q", -1, "&pstmt", "NULL");
     for (my $i = 0; $i < $num_pk; $i++) {
         # all binds occur at index 1+
@@ -513,6 +518,7 @@ sub generate_free {
 
     print $fhh "extern void $$struct{'name'}_free(struct $$struct{'name'}* $this);\n";
     print $fhc "void $$struct{'name'}_free(struct $$struct{'name'}* $this) {\n";
+    print $fhc "assert(this);\n";
     print $fhc "$$struct{'name'}_release(this);\n";
     print $fhc "free(this);\n";
     print $fhc "}\n";
@@ -523,7 +529,7 @@ sub generate_release {
 
     print $fhh "extern void $$struct{'name'}_release(struct $$struct{'name'}* $this);\n";
     print $fhc "void $$struct{'name'}_release(struct $$struct{'name'}* $this) {\n";
-    print $fhc "(void)this;\n";
+    print $fhc "assert(this);\n";
     foreach my $var (@{$$struct{"variables"}}) {
         if ($$var{"ctype"} eq "char*") {
             print $fhc "if (this->$$var{'name'}) {\n";
