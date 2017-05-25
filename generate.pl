@@ -49,6 +49,7 @@ my %data_types = (
     "SMALLINT"          => "short",
     "INTEGER"           => "int",
     "INT"               => "int",
+    "TINYINT"           => "char",
     "BIGINT"            => "long",
     "REAL"              => "float",
     "FLOAT"             => "float",
@@ -60,7 +61,7 @@ my %data_types = (
 
 my $table_def = 'CREATE\s+TABLE\s+(\w+)\s*\(';
 my $column_def = '(\w+)\s+(\w+)';
-my $primary_key_def = 'PRIMARY\s+KEY\(([^\)]+)\)';
+my $primary_key_def = 'PRIMARY\s+KEY\s*\(([^\)]+)\)';
 
 my $db_ref_name = "db";
 my $this = "this";
